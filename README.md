@@ -37,19 +37,3 @@
 ### セキュリティ
 - オリジン検証（`https://ehagaki.vercel.app`のみ許可）
 - 不正なメッセージの無視
-
-## 開発
-
-ローカルでテストする場合は、HTTPサーバーを起動してください：
-
-```bash
-# Python 3の場合
-python -m http.server 8000
-
-# Node.jsの場合
-npx http-server
-
-# VS Code Live Server拡張機能を使用
-```
-
-その後、ブラウザで `http://localhost:8000` にアクセスしてください。

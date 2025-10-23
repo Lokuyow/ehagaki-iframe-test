@@ -61,18 +61,18 @@ window.addEventListener('message', (event) => {
     if (data.type === 'POST_SUCCESS') {
         console.log('投稿成功:', data);
         showStatus('✅ 投稿に成功しました！', true);
-        
+
         // 投稿成功時にダイアログを閉じる
         setTimeout(() => {
             closeDialog();
-        }, 1500); // 1.5秒後に閉じる（ユーザーが成功メッセージを確認できるように）
-        
+        }, 800); // 0.8秒後に閉じる（ユーザーが成功メッセージを確認できるように）
+
     } else if (data.type === 'POST_ERROR') {
         console.error('投稿失敗:', data);
-        
+
         // エラーメッセージを生成
         let errorMessage = '❌ 投稿に失敗しました';
-        
+
         if (data.error) {
             switch (data.error) {
                 case 'empty_content':
@@ -94,9 +94,9 @@ window.addEventListener('message', (event) => {
                     errorMessage += `: ${data.error}`;
             }
         }
-        
+
         showStatus(errorMessage, false);
-        
+
         // エラー時はダイアログを閉じない（ユーザーが再試行できるように）
     }
 });
