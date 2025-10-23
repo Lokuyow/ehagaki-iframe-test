@@ -7,6 +7,12 @@ const iframe = document.getElementById('ehagaki-iframe');
 
 // ダイアログを開く
 function openDialog() {
+    const contentInput = document.getElementById('contentInput');
+    const content = contentInput.value.trim();
+    const encodedContent = encodeURIComponent(content);
+    const iframe = document.getElementById('ehagaki-iframe');
+    iframe.src = `https://ehagaki.vercel.app/?content=${encodedContent}`;
+
     modal.style.display = 'block';
     document.body.style.overflow = 'hidden'; // 背景のスクロールを無効化
     hideStatus();
@@ -65,6 +71,8 @@ window.addEventListener('message', (event) => {
         // 投稿成功時にダイアログを閉じる
         setTimeout(() => {
             closeDialog();
+            // テキストボックスをクリア
+            document.getElementById('contentInput').value = '';
         }, 800); // 0.8秒後に閉じる（ユーザーが成功メッセージを確認できるように）
 
     } else if (data.type === 'POST_ERROR') {

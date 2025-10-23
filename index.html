@@ -136,11 +136,17 @@
 <body>
     <div class="container">
         <h1>eHagaki iframe 埋め込みテスト</h1>
-        <p>下のボタンをクリックすると、ダイアログ内でeHagakiの投稿フォームが開きます。投稿成功時にダイアログが自動で閉じるかのテストです。</p>
+        <ul>
+            <li>iframeテスト</li>
+            <li>投稿成功時にpostMessageを受け取りダイアログが閉じるかテスト</li>
+            <li>iframeを開く時にテキストボックス内の文字をエディターに入力して開くテスト</li>
+        </ul>
         
         <button id="openDialogBtn" class="open-button">
             📝 eHagaki を開く
         </button>
+
+        <input type="text" id="contentInput" placeholder="投稿内容を入力..." style="display: block; margin: 10px auto; padding: 8px; width: 300px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px;">
 
         <div id="status" class="status hidden"></div>
     </div>
