@@ -11,7 +11,7 @@ function openDialog() {
     const content = contentInput.value.trim();
     const encodedContent = encodeURIComponent(content);
     const iframe = document.getElementById('ehagaki-iframe');
-    iframe.src = `https://ehagaki.vercel.app/?content=${encodedContent}`;
+    iframe.src = `https://lokuyow.github.io/ehagaki/?content=${encodedContent}`;
 
     modal.style.display = 'block';
     document.body.style.overflow = 'hidden'; // 背景のスクロールを無効化
@@ -56,7 +56,7 @@ document.addEventListener('keydown', (event) => {
 // postMessageを受信してダイアログ制御
 window.addEventListener('message', (event) => {
     // セキュリティ: 送信元のオリジンを確認
-    if (event.origin !== 'https://ehagaki.vercel.app') {
+    if (event.origin !== 'https://lokuyow.github.io') {
         console.warn('信頼できないオリジンからのメッセージを受信:', event.origin);
         return;
     }
