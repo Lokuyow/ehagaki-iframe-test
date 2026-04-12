@@ -132,26 +132,19 @@
 
         .modal-content {
             position: relative;
-            margin: 5% auto;
-            width: 90%;
-            max-width: 700px;
+            margin: auto;
+            width: 100%;
+            max-width: 800px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
             overflow: hidden;
         }
 
-        .modal-header {
+        .modal-footer {
             display: flex;
-            justify-content: space-between;
+            justify-content: center;
             align-items: center;
-            padding: 8px 20px;
             background-color: #f8f9fa;
-            border-bottom: 1px solid #dee2e6;
-        }
-
-        .modal-title {
-            margin: 0;
-            color: #333;
-            font-size: 18px;
+            flex-shrink: 0;
         }
 
         .close-button {
@@ -161,8 +154,8 @@
             cursor: pointer;
             color: #666;
             padding: 0;
-            width: 30px;
-            height: 30px;
+            width: 100%;
+            height: 100%;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -173,14 +166,16 @@
         }
 
         .modal-body {
-            height: 500px;
             padding: 0;
+            margin: 0;
+            font-size: 0;
         }
 
         .ehagaki-iframe {
             width: 100%;
-            height: 500px;
+            height: 95dvh;
             border: none;
+            flex-shrink: 1;
         }
 
         .status {
@@ -236,13 +231,12 @@
     <!-- モーダルダイアログ -->
     <div id="modal" class="modal">
         <div class="modal-content">
-            <div class="modal-header">
-                <h3 class="modal-title">eHagaki</h3>
-                <button id="closeBtn" class="close-button">&times;</button>
-            </div>
             <div class="modal-body">
                 <iframe id="ehagaki-iframe" src="https://ehagaki.vercel.app/" class="ehagaki-iframe">
                 </iframe>
+            </div>
+            <div class="modal-footer">
+                <button id="closeBtn" class="close-button">&times;</button>
             </div>
         </div>
     </div>
