@@ -1,3 +1,5 @@
+https://lokuyow.github.io/ehagaki-iframe-test/
+
 # eHagaki iframe 埋め込みテスト
 
 このプロジェクトは、eHagakiをiframeとしてダイアログ内に埋め込み、
