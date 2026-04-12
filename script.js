@@ -4,18 +4,48 @@ const modal = document.getElementById('modal');
 const closeBtn = document.getElementById('closeBtn');
 const statusDiv = document.getElementById('status');
 const iframe = document.getElementById('ehagaki-iframe');
+const timelineStatusDiv = document.getElementById('timelineStatus');
+const timelineDiv = document.getElementById('timeline');
+
+const EHAGAKI_ORIGIN = 'https://ehagaki.vercel.app';
+const EHAGAKI_URL = `${EHAGAKI_ORIGIN}/`;
+const RELAY_URL = 'wss://yabu.me/';
+const SUBSCRIPTION_LIMIT = 30;
+
+let relaySocket = null;
+let relayConnected = false;
+let timelineEvents = [];
+let relayEoseReceived = false;
 
 // ダイアログを開く
-function openDialog() {
+function openDialog(params = {}) {
     const contentInput = document.getElementById('contentInput');
     const content = contentInput.value.trim();
-    const encodedContent = encodeURIComponent(content);
+    const url = buildIframeUrl(content, params);
     const iframe = document.getElementById('ehagaki-iframe');
-    iframe.src = `https://lokuyow.github.io/ehagaki/?content=${encodedContent}`;
+    iframe.src = url;
 
     modal.style.display = 'block';
     document.body.style.overflow = 'hidden'; // 背景のスクロールを無効化
     hideStatus();
+}
+
+function buildIframeUrl(content, params = {}) {
+    const url = new URL(EHAGAKI_URL);
+
+    if (content) {
+        url.searchParams.set('content', content);
+    }
+
+    if (params.reply) {
+        url.searchParams.set('reply', params.reply);
+    }
+
+    if (params.quote) {
+        url.searchParams.set('quote', params.quote);
+    }
+
+    return url.toString();
 }
 
 // ダイアログを閉じる
@@ -33,6 +63,303 @@ function showStatus(message, isSuccess = true) {
 // ステータスメッセージを非表示
 function hideStatus() {
     statusDiv.className = 'status hidden';
+}
+
+function setTimelineStatus(message, isError = false) {
+    timelineStatusDiv.textContent = message;
+    timelineStatusDiv.className = `timeline-status${isError ? ' error' : ''}`;
+}
+
+function truncate(value, maxLength = 10) {
+    if (!value || value.length <= maxLength) {
+        return value;
+    }
+
+    return `${value.slice(0, maxLength)}...`;
+}
+
+function formatDate(timestampSeconds) {
+    const date = new Date(timestampSeconds * 1000);
+    return date.toLocaleString('ja-JP');
+}
+
+function bytesToHex(bytes) {
+    return Array.from(bytes)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+}
+
+function hexToBytes(hex) {
+    if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2 !== 0) {
+        throw new Error('不正なHEXです');
+    }
+
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < bytes.length; i += 1) {
+        bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    }
+    return bytes;
+}
+
+function convertBits(data, fromBits, toBits, pad = true) {
+    let acc = 0;
+    let bits = 0;
+    const result = [];
+    const maxv = (1 << toBits) - 1;
+
+    for (const value of data) {
+        if (value < 0 || value >> fromBits !== 0) {
+            return null;
+        }
+
+        acc = (acc << fromBits) | value;
+        bits += fromBits;
+        while (bits >= toBits) {
+            bits -= toBits;
+            result.push((acc >> bits) & maxv);
+        }
+    }
+
+    if (pad) {
+        if (bits > 0) {
+            result.push((acc << (toBits - bits)) & maxv);
+        }
+    } else if (bits >= fromBits || ((acc << (toBits - bits)) & maxv) !== 0) {
+        return null;
+    }
+
+    return result;
+}
+
+function bech32Polymod(values) {
+    const generators = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+    let chk = 1;
+
+    for (const value of values) {
+        const top = chk >> 25;
+        chk = ((chk & 0x1ffffff) << 5) ^ value;
+        for (let i = 0; i < 5; i += 1) {
+            if ((top >> i) & 1) {
+                chk ^= generators[i];
+            }
+        }
+    }
+
+    return chk;
+}
+
+function bech32HrpExpand(hrp) {
+    const expanded = [];
+    for (let i = 0; i < hrp.length; i += 1) {
+        expanded.push(hrp.charCodeAt(i) >> 5);
+    }
+    expanded.push(0);
+    for (let i = 0; i < hrp.length; i += 1) {
+        expanded.push(hrp.charCodeAt(i) & 31);
+    }
+    return expanded;
+}
+
+function bech32CreateChecksum(hrp, data) {
+    const values = [...bech32HrpExpand(hrp), ...data, 0, 0, 0, 0, 0, 0];
+    const polymod = bech32Polymod(values) ^ 1;
+    const checksum = [];
+    for (let i = 0; i < 6; i += 1) {
+        checksum.push((polymod >> (5 * (5 - i))) & 31);
+    }
+    return checksum;
+}
+
+function bech32Encode(hrp, data) {
+    const charset = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+    const checksum = bech32CreateChecksum(hrp, data);
+    const combined = [...data, ...checksum];
+    let output = `${hrp}1`;
+
+    for (const value of combined) {
+        output += charset[value];
+    }
+
+    return output;
+}
+
+function toNoteId(eventIdHex) {
+    try {
+        const data = convertBits(hexToBytes(eventIdHex), 8, 5, true);
+        if (!data) {
+            return null;
+        }
+        return bech32Encode('note', data);
+    } catch (error) {
+        console.error('note1変換失敗:', error);
+        return null;
+    }
+}
+
+function isValidEvent(event) {
+    return (
+        event &&
+        typeof event.id === 'string' &&
+        typeof event.pubkey === 'string' &&
+        typeof event.content === 'string' &&
+        typeof event.created_at === 'number' &&
+        event.kind === 1
+    );
+}
+
+function renderTimeline() {
+    timelineDiv.innerHTML = '';
+
+    if (timelineEvents.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'timeline-item';
+        empty.textContent = '表示できる投稿がまだありません。';
+        timelineDiv.appendChild(empty);
+        return;
+    }
+
+    timelineEvents.forEach((eventItem) => {
+        const item = document.createElement('div');
+        item.className = 'timeline-item';
+
+        const header = document.createElement('div');
+        header.className = 'timeline-item-header';
+
+        const pubkey = document.createElement('span');
+        pubkey.textContent = `pubkey: ${truncate(eventItem.pubkey)}`;
+
+        const date = document.createElement('span');
+        date.textContent = formatDate(eventItem.created_at);
+
+        header.appendChild(pubkey);
+        header.appendChild(date);
+
+        const content = document.createElement('div');
+        content.className = 'timeline-item-content';
+        content.textContent = eventItem.content || '(本文なし)';
+
+        const actions = document.createElement('div');
+        actions.className = 'timeline-actions';
+
+        const noteId = toNoteId(eventItem.id);
+        if (noteId) {
+            const replyBtn = document.createElement('button');
+            replyBtn.className = 'timeline-action-btn';
+            replyBtn.textContent = '↩ リプライ';
+            replyBtn.addEventListener('click', () => {
+                openDialog({ reply: noteId });
+            });
+
+            const quoteBtn = document.createElement('button');
+            quoteBtn.className = 'timeline-action-btn';
+            quoteBtn.textContent = '💬 引用リポスト';
+            quoteBtn.addEventListener('click', () => {
+                openDialog({ quote: noteId });
+            });
+
+            actions.appendChild(replyBtn);
+            actions.appendChild(quoteBtn);
+        }
+
+        item.appendChild(header);
+        item.appendChild(content);
+        item.appendChild(actions);
+        timelineDiv.appendChild(item);
+    });
+}
+
+function upsertTimelineEvent(eventItem) {
+    if (!isValidEvent(eventItem)) {
+        return;
+    }
+
+    const exists = timelineEvents.some((item) => item.id === eventItem.id);
+    if (exists) {
+        return;
+    }
+
+    timelineEvents.push(eventItem);
+    timelineEvents.sort((a, b) => b.created_at - a.created_at);
+    timelineEvents = timelineEvents.slice(0, SUBSCRIPTION_LIMIT);
+    renderTimeline();
+}
+
+function handleRelayMessage(message) {
+    if (!Array.isArray(message) || message.length < 2) {
+        return;
+    }
+
+    const [type, subId, payload] = message;
+    if (subId !== 'timeline-sub') {
+        return;
+    }
+
+    if (type === 'EVENT') {
+        upsertTimelineEvent(payload);
+        if (!relayEoseReceived) {
+            setTimelineStatus(`取得中... ${timelineEvents.length}件`);
+        }
+        return;
+    }
+
+    if (type === 'EOSE') {
+        relayEoseReceived = true;
+        setTimelineStatus(`接続中: ${timelineEvents.length}件を表示`);
+        return;
+    }
+
+    if (type === 'NOTICE' && typeof payload === 'string') {
+        setTimelineStatus(`リレー通知: ${payload}`, true);
+    }
+}
+
+function connectRelay() {
+    if (relaySocket && (relaySocket.readyState === WebSocket.OPEN || relaySocket.readyState === WebSocket.CONNECTING)) {
+        return;
+    }
+
+    setTimelineStatus('タイムラインを接続中...');
+    relayEoseReceived = false;
+
+    relaySocket = new WebSocket(RELAY_URL);
+
+    relaySocket.addEventListener('open', () => {
+        relayConnected = true;
+        setTimelineStatus('接続完了。投稿を取得しています...');
+
+        const request = [
+            'REQ',
+            'timeline-sub',
+            {
+                kinds: [1],
+                limit: SUBSCRIPTION_LIMIT
+            }
+        ];
+        relaySocket.send(JSON.stringify(request));
+    });
+
+    relaySocket.addEventListener('message', (event) => {
+        try {
+            const message = JSON.parse(event.data);
+            handleRelayMessage(message);
+        } catch (error) {
+            console.error('リレーメッセージ解析失敗:', error);
+        }
+    });
+
+    relaySocket.addEventListener('error', () => {
+        relayConnected = false;
+        setTimelineStatus('リレー接続でエラーが発生しました。再読込してください。', true);
+    });
+
+    relaySocket.addEventListener('close', () => {
+        relayConnected = false;
+        if (timelineEvents.length === 0) {
+            setTimelineStatus('リレー接続が切断されました。再読込してください。', true);
+        } else {
+            setTimelineStatus(`切断されました（表示中 ${timelineEvents.length}件）`, true);
+        }
+    });
 }
 
 // イベントリスナーの設定
@@ -56,7 +383,7 @@ document.addEventListener('keydown', (event) => {
 // postMessageを受信してダイアログ制御
 window.addEventListener('message', (event) => {
     // セキュリティ: 送信元のオリジンを確認
-    if (event.origin !== 'https://lokuyow.github.io') {
+    if (event.origin !== EHAGAKI_ORIGIN) {
         console.warn('信頼できないオリジンからのメッセージを受信:', event.origin);
         return;
     }
@@ -113,4 +440,6 @@ window.addEventListener('message', (event) => {
 document.addEventListener('DOMContentLoaded', () => {
     console.log('eHagaki iframe テストページが読み込まれました');
     hideStatus();
+    renderTimeline();
+    connectRelay();
 });
