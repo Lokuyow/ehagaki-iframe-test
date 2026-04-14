@@ -415,9 +415,18 @@ function connectRelay() {
 // ---------- Wallet / Parent-client helpers ----------
 async function getCurrentPubkey() {
     if (userPubkey) return userPubkey;
-    if (window.nostr && typeof window.nostr.getPublicKey === 'function') {
+    // Try to obtain NIP-07 provider; wait briefly if it may be injected later
+    let nostr = window.nostr;
+    if (!nostr && window.nip07Awaiter && typeof window.nip07Awaiter.waitNostr === 'function') {
         try {
-            const pk = await window.nostr.getPublicKey();
+            nostr = await window.nip07Awaiter.waitNostr(2000);
+        } catch (e) {
+            // ignore, will throw no_wallet below
+        }
+    }
+    if (nostr && typeof nostr.getPublicKey === 'function') {
+        try {
+            const pk = await nostr.getPublicKey();
             return pk;
         } catch (err) {
             throw new Error('user_rejected');
@@ -427,13 +436,23 @@ async function getCurrentPubkey() {
 }
 
 async function signEventWithYourClient(event) {
-    if (!window.nostr) {
+    // Try to obtain NIP-07 provider; wait briefly if needed
+    let nostr = window.nostr;
+    if (!nostr && window.nip07Awaiter && typeof window.nip07Awaiter.waitNostr === 'function') {
+        try {
+            nostr = await window.nip07Awaiter.waitNostr(2000);
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    if (!nostr) {
         throw new Error('no_wallet');
     }
 
-    if (typeof window.nostr.signEvent === 'function') {
+    if (typeof nostr.signEvent === 'function') {
         try {
-            const signed = await window.nostr.signEvent(event);
+            const signed = await nostr.signEvent(event);
             if (typeof signed === 'string') {
                 return { ...event, sig: signed };
             }
