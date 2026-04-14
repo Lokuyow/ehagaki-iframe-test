@@ -6,15 +6,13 @@ const statusDiv = document.getElementById('status');
 const iframe = document.getElementById('ehagaki-iframe');
 const timelineStatusDiv = document.getElementById('timelineStatus');
 const timelineDiv = document.getElementById('timeline');
-
-// デバッグ: スクリプトが読み込まれたことと、window.nostr の有無をログに出す
-console.log('script.js loaded:', window.location.href);
-console.debug('window.nostr present:', typeof window.nostr !== 'undefined');
-// Login UI
 const loginBtn = document.getElementById('loginBtn');
 const logoutBtn = document.getElementById('logoutBtn');
 const loginInfoDiv = document.getElementById('loginInfo');
 const loginPubkeySpan = document.getElementById('loginPubkey');
+const skInput = document.getElementById('skInput');
+const skLoginBtn = document.getElementById('skLoginBtn');
+const skClearBtn = document.getElementById('skClearBtn');
 
 // eHagaki 設定
 const EHAGAKI_ORIGIN = 'https://ehagaki.vercel.app';
@@ -24,9 +22,14 @@ const RELAY_URL = 'wss://yabu.me/';
 const SUBSCRIPTION_LIMIT = 30;
 
 let relaySocket = null;
-let relayConnected = false;
 let timelineEvents = [];
 let relayEoseReceived = false;
+const TRUSTED_ORIGINS = new Set([
+    EHAGAKI_ORIGIN,
+    window.location.origin,
+    'https://lokuyow.github.io',
+    'http://127.0.0.1:3000',
+]);
 
 // throttle helper for subframe positioning responses
 let _lastPositionResponseAt = 0;
@@ -400,7 +403,6 @@ function connectRelay() {
     relaySocket = new WebSocket(RELAY_URL);
 
     relaySocket.addEventListener('open', () => {
-        relayConnected = true;
         setTimelineStatus('接続完了。投稿を取得しています...');
 
         const request = [
@@ -424,12 +426,10 @@ function connectRelay() {
     });
 
     relaySocket.addEventListener('error', () => {
-        relayConnected = false;
         setTimelineStatus('リレー接続でエラーが発生しました。再読込してください。', true);
     });
 
     relaySocket.addEventListener('close', () => {
-        relayConnected = false;
         if (timelineEvents.length === 0) {
             setTimelineStatus('リレー接続が切断されました。再読込してください。', true);
         } else {
@@ -442,6 +442,7 @@ function connectRelay() {
 // local secret-key storage key (stores private key HEX in localStorage)
 const PRIVKEY_STORAGE_KEY = 'ehagaki_privkey';
 let sessionSk = null; // hex private key for current session (64 hex chars)
+let secpLibPromise = null;
 
 function saveSkToStorage(skHex) {
     try {
@@ -460,6 +461,11 @@ function loadSkFromStorage() {
     }
 }
 
+function getStoredSecretKey() {
+    const stored = loadSkFromStorage();
+    return typeof stored === 'string' && stored ? stored : null;
+}
+
 function clearLocalSkStorage() {
     try {
         localStorage.removeItem(PRIVKEY_STORAGE_KEY);
@@ -468,12 +474,42 @@ function clearLocalSkStorage() {
     }
 }
 
-function hasStoredSk() {
-    try {
-        return !!localStorage.getItem(PRIVKEY_STORAGE_KEY);
-    } catch (e) {
-        return false;
+function syncStoredKeyUI() {
+    if (skClearBtn) {
+        skClearBtn.style.display = getStoredSecretKey() ? 'inline-block' : 'none';
     }
+}
+
+function normalizeSecretKey(skValue) {
+    if (!skValue) {
+        throw new Error('invalid_sk');
+    }
+
+    if (typeof skValue !== 'string') {
+        return skValue;
+    }
+
+    let normalized = skValue.trim();
+    if (normalized.startsWith('nsec1')) {
+        normalized = bech32Decode(normalized);
+    }
+    if (normalized.startsWith('0x')) {
+        normalized = normalized.slice(2);
+    }
+    return normalized;
+}
+
+function normalizeHexValue(value) {
+    if (typeof value === 'string') {
+        return value.startsWith('0x') ? value.slice(2) : value;
+    }
+    if (value instanceof Uint8Array) {
+        return bytesToHex(value);
+    }
+    if (Array.isArray(value)) {
+        return bytesToHex(new Uint8Array(value));
+    }
+    throw new Error('invalid_hex_value');
 }
 
 // bech32 decode for nsec / npub conversion (returns hex string)
@@ -506,78 +542,51 @@ function _getSecpLib() {
 }
 
 async function ensureSecp() {
-    const existing = _getSecpLib();
-    if (existing) return existing;
+    if (!secpLibPromise) {
+        const existing = _getSecpLib();
+        if (existing) {
+            secpLibPromise = Promise.resolve(existing);
+        } else {
+            secpLibPromise = (async () => {
+                const esmCandidates = [
+                    'https://esm.sh/@noble/secp256k1@1.7.2',
+                    'https://cdn.jsdelivr.net/npm/@noble/secp256k1@1.7.2/+esm',
+                    'https://cdn.skypack.dev/@noble/secp256k1@1.7.2'
+                ];
 
-    // Try ESM proxies first (may work if CORS allowed). Do not spam console on failure.
-    const esmCandidates = [
-        'https://esm.sh/@noble/secp256k1',
-        'https://cdn.skypack.dev/@noble/secp256k1'
-    ];
-    for (const url of esmCandidates) {
-        try {
-            const mod = await import(/* @vite-ignore */ url);
-            const secp = mod && (mod.default || mod);
-            if (secp && typeof secp.getPublicKey === 'function') {
-                window.nobleSecp256k1 = secp;
-                return secp;
-            }
-        } catch (e) {
-            // silent
+                for (const url of esmCandidates) {
+                    try {
+                        const mod = await import(/* @vite-ignore */ url);
+                        const secp = mod && (mod.default || mod);
+                        if (secp && typeof secp.getPublicKey === 'function') {
+                            return secp;
+                        }
+                    } catch (e) {
+                        // ignore and try next candidate
+                    }
+                }
+
+                throw new Error('no_secp_lib');
+            })();
         }
     }
 
-    // Prefer the UMD build already included in the page. If it's not present,
-    // inject the known UMD minified script and poll for the global to appear.
-    const umdSrc = 'https://cdn.jsdelivr.net/npm/@noble/secp256k1@1.10.0/lib/index.umd.min.js';
-    const existingScript = document.querySelector(`script[src="${umdSrc}"]`);
-    if (!existingScript) {
-        const s = document.createElement('script');
-        s.src = umdSrc;
-        s.async = true;
-        document.head.appendChild(s);
-    }
-
-    const deadline = Date.now() + 5000; // wait up to 5s
-    while (Date.now() < deadline) {
-        const lib = _getSecpLib();
-        if (lib) return lib;
-        // short delay
-        // eslint-disable-next-line no-await-in-loop
-        await new Promise((r) => setTimeout(r, 100));
-    }
-
-    throw new Error('no_secp_lib');
-}
-// For diagnostics: helper to list potential global matches
-function _diagnoseSecpGlobals() {
     try {
-        const keys = Object.keys(window || {});
-        const matches = keys.filter(k => /secp|noble|nobleSecp|secp256k1/i.test(k));
-        const info = {};
-        matches.forEach(k => {
-            try { info[k] = typeof window[k]; } catch (e) { info[k] = 'error'; }
-        });
-        console.error('Secp globals diagnostic:', info);
-        return info;
-    } catch (e) {
-        console.error('diagnoseSecpGlobals failed', e);
-        return null;
+        return await secpLibPromise;
+    } catch (error) {
+        secpLibPromise = null;
+        throw error;
     }
 }
 
 async function getPubkeyFromSk(skHex) {
-    if (!skHex) throw new Error('invalid_sk');
-    if (skHex.startsWith('nsec1')) {
-        skHex = bech32Decode(skHex);
-    }
-    if (skHex.startsWith('0x')) skHex = skHex.slice(2);
+    const normalizedSk = normalizeSecretKey(skHex);
 
     const secp = await ensureSecp();
 
     try {
         // Convert secret key hex to Uint8Array if needed
-        const skBuf = (typeof skHex === 'string') ? hexToBytes(skHex) : skHex;
+        const skBuf = (typeof normalizedSk === 'string') ? hexToBytes(normalizedSk) : normalizedSk;
         // Prefer compressed public key (33 bytes) and return the X coordinate (32 bytes hex)
         let pub = secp.getPublicKey ? secp.getPublicKey(skBuf, true) : null;
         // handle promise/async libraries
@@ -627,127 +636,118 @@ async function getEventHash(event) {
 }
 
 async function signWithSk(idHex, skHex) {
-    if (skHex.startsWith('nsec1')) {
-        skHex = bech32Decode(skHex);
-    }
+    const normalizedSk = normalizeSecretKey(skHex);
     const secp = await ensureSecp();
-    try {
-        // convert inputs to Uint8Array if needed
-        const msgBuf = (typeof idHex === 'string') ? hexToBytes(idHex) : idHex;
-        const skBuf = (typeof skHex === 'string') ? hexToBytes(skHex) : skHex;
-        // Prefer Schnorr signing (Nostr requires BIP340 Schnorr signatures).
-        if (secp.schnorr && typeof secp.schnorr.sign === 'function') {
-            // produce signature
-            let sig = secp.schnorr.sign(msgBuf, skBuf);
-            if (sig instanceof Promise) sig = await sig;
-            // normalize sig to hex string (no 0x)
-            let sigHex;
-            if (typeof sig === 'string') {
-                sigHex = sig.startsWith('0x') ? sig.slice(2) : sig;
-            } else if (sig instanceof Uint8Array) {
-                sigHex = bytesToHex(sig);
-            } else if (Array.isArray(sig)) {
-                sigHex = bytesToHex(new Uint8Array(sig));
-            } else {
-                sigHex = String(sig);
-            }
-
-
-            // verification step: derive pubkey and verify signature locally before returning
-            try {
-                const derivedPubHex = await getPubkeyFromSk(skHex);
-                const canVerify = (typeof secp.schnorr.verify === 'function');
-                let verified = false;
-                if (canVerify) {
-                    verified = await secp.schnorr.verify(sigHex, msgBuf, derivedPubHex);
-                }
-                console.debug('signWithSk: local verify', { canVerify, verified, idHex, pubkey: derivedPubHex, sigLen: sigHex.length });
-                if (!verified) {
-                    console.error('署名の検証に失敗しました', { idHex, pubkey: derivedPubHex, sig: sigHex.slice(0, 16) + '...' });
-                    _diagnoseSecpGlobals();
-                    throw new Error('signature_verification_failed');
-                }
-            } catch (verErr) {
-                console.error('署名検証中にエラーが発生しました', verErr);
-                throw verErr;
-            }
-
-            return sigHex;
-        }
-
-        // If Schnorr API is not available, fail loudly with diagnostics rather than returning an incompatible signature.
-        console.error('schnorr API not available on secp lib; aborting signature.');
-        _diagnoseSecpGlobals();
+    if (!secp.schnorr || typeof secp.schnorr.sign !== 'function' || typeof secp.schnorr.verify !== 'function') {
         throw new Error('schnorr_not_available');
-    } catch (e) {
-        console.error('signWithSk error', e);
-        throw e;
     }
+
+    const msgBuf = (typeof idHex === 'string') ? hexToBytes(idHex) : idHex;
+    const skBuf = (typeof normalizedSk === 'string') ? hexToBytes(normalizedSk) : normalizedSk;
+    let sig = secp.schnorr.sign(msgBuf, skBuf);
+    if (sig instanceof Promise) sig = await sig;
+
+    const sigHex = normalizeHexValue(sig);
+    const derivedPubHex = await getPubkeyFromSk(normalizedSk);
+    const verified = await secp.schnorr.verify(sigHex, msgBuf, derivedPubHex);
+    if (!verified) {
+        throw new Error('signature_verification_failed');
+    }
+
+    return sigHex;
 }
 
 async function signEventWithSk(event, skHex) {
-    try {
-        // work on a shallow copy to avoid mutating caller's object
-        const ev = { ...event };
+    const normalizedSk = normalizeSecretKey(skHex);
+    const derivedPubkey = await getPubkeyFromSk(normalizedSk);
+    const normalizedEvent = {
+        ...event,
+        pubkey: derivedPubkey,
+        created_at: typeof event.created_at === 'number' && event.created_at > 1000000000000
+            ? Math.floor(event.created_at / 1000)
+            : event.created_at,
+    };
+    const id = await getEventHash(normalizedEvent);
+    const sig = await signWithSk(id, normalizedSk);
 
-        // normalize secret key (allow nsec1 input)
-        let sk = skHex;
-        if (typeof sk === 'string' && sk.startsWith('nsec1')) {
-            sk = bech32Decode(sk);
-        }
+    return { ...normalizedEvent, id, sig };
+}
 
-        // ensure the event pubkey matches the derived pubkey for the provided secret key
-        try {
-            const derivedPub = await getPubkeyFromSk(sk);
-            if (!ev.pubkey || ev.pubkey !== derivedPub) {
-                console.debug('signEventWithSk: normalizing event.pubkey', { original: ev.pubkey, derived: derivedPub });
-                ev.pubkey = derivedPub;
-            }
-        } catch (e) {
-            console.warn('signEventWithSk: 公開鍵の導出に失敗しました', e);
-        }
-
-        // normalize created_at (milliseconds -> seconds) if needed
-        if (typeof ev.created_at === 'number' && ev.created_at > 1000000000000) {
-            ev.created_at = Math.floor(ev.created_at / 1000);
-        }
-
-        const id = await getEventHash(ev);
-        const sig = await signWithSk(id, sk);
-
-        const signedEvent = { ...ev, id, sig };
-
-        // 保存用の診断情報を localStorage に書き出す（秘密鍵は含めない）
-        try {
-            const diag = {
-                timestamp: Date.now(),
-                pubkey: ev.pubkey,
-                signedEvent,
-            };
-            localStorage.setItem('ehagaki_diag_signed_event', JSON.stringify(diag));
-        } catch (e) {
-            console.warn('diagnostic save failed', e);
-        }
-
-        console.debug('signEventWithSk: created signed event', { id, sig: sig && typeof sig === 'string' ? (sig.slice(0, 16) + '...') : sig, pubkey: ev.pubkey });
-        return signedEvent;
-    } catch (e) {
-        console.error('signEventWithSk error', e);
-        throw e;
+async function validateSignedEvent(event, expectedPubkey = null) {
+    if (!event || typeof event !== 'object') {
+        throw new Error('invalid_signed_event');
     }
+
+    if (typeof event.id !== 'string' || typeof event.pubkey !== 'string' || typeof event.sig !== 'string') {
+        throw new Error('invalid_signed_event_shape');
+    }
+
+    if (expectedPubkey && event.pubkey !== expectedPubkey) {
+        throw new Error('signed_event_pubkey_mismatch');
+    }
+
+    const computedId = await getEventHash(event);
+    if (event.id !== computedId) {
+        throw new Error('signed_event_id_mismatch');
+    }
+
+    const secp = await ensureSecp();
+    if (!secp.schnorr || typeof secp.schnorr.verify !== 'function') {
+        throw new Error('schnorr_verify_not_available');
+    }
+
+    const verified = await secp.schnorr.verify(event.sig, hexToBytes(event.id), event.pubkey);
+    if (!verified) {
+        throw new Error('signed_event_signature_invalid');
+    }
+
+    return event;
+}
+
+async function tryGetNip07Provider() {
+    let nostr = window.nostr;
+    if (!nostr && window.nip07Awaiter?.waitNostr) {
+        try {
+            nostr = await window.nip07Awaiter.waitNostr(2000);
+        } catch (e) {
+            // ignore and fall back to other signers
+        }
+    }
+    return nostr;
+}
+
+async function resolveSecretKeySigner() {
+    const candidates = [];
+
+    if (sessionSk) {
+        candidates.push(sessionSk);
+    }
+
+    const stored = getStoredSecretKey();
+    if (stored && stored !== sessionSk) {
+        candidates.push(stored);
+    }
+
+    for (const candidate of candidates) {
+        try {
+            const candidatePubkey = await getPubkeyFromSk(candidate);
+            if (!userPubkey || userPubkey === candidatePubkey) {
+                return {
+                    sk: candidate,
+                    pubkey: candidatePubkey,
+                };
+            }
+        } catch (error) {
+            console.warn('秘密鍵候補の公開鍵導出に失敗しました', error);
+        }
+    }
+
+    return null;
 }
 
 async function getCurrentPubkey() {
     if (userPubkey) return userPubkey;
-    // Try to obtain NIP-07 provider; wait briefly if it may be injected later
-    let nostr = window.nostr;
-    if (!nostr && window.nip07Awaiter && typeof window.nip07Awaiter.waitNostr === 'function') {
-        try {
-            nostr = await window.nip07Awaiter.waitNostr(2000);
-        } catch (e) {
-            // ignore, will try other fallbacks
-        }
-    }
+    const nostr = await tryGetNip07Provider();
     if (nostr && typeof nostr.getPublicKey === 'function') {
         try {
             const pk = await nostr.getPublicKey();
@@ -768,14 +768,12 @@ async function getCurrentPubkey() {
     }
 
     // Fallback: stored private key in localStorage (plain HEX)
-    if (hasStoredSk()) {
+    const stored = getStoredSecretKey();
+    if (stored) {
         try {
-            const stored = loadSkFromStorage();
-            if (stored) {
-                sessionSk = stored;
-                const pub = await getPubkeyFromSk(sessionSk);
-                return pub;
-            }
+            sessionSk = normalizeSecretKey(stored);
+            const pub = await getPubkeyFromSk(sessionSk);
+            return pub;
         } catch (e) {
             console.warn('保存鍵の読み込みに失敗しました', e);
             throw new Error('key_not_found');
@@ -786,48 +784,30 @@ async function getCurrentPubkey() {
 }
 
 async function signEventWithYourClient(event) {
-    // Try to obtain NIP-07 provider; wait briefly if needed
-    let nostr = window.nostr;
-    if (!nostr && window.nip07Awaiter && typeof window.nip07Awaiter.waitNostr === 'function') {
-        try {
-            nostr = await window.nip07Awaiter.waitNostr(2000);
-        } catch (e) {
-            // ignore
+    const secretKeySigner = await resolveSecretKeySigner();
+    if (secretKeySigner) {
+        if (secretKeySigner.sk !== sessionSk) {
+            sessionSk = secretKeySigner.sk;
         }
+        return await signEventWithSk(event, secretKeySigner.sk);
     }
+
+    const nostr = await tryGetNip07Provider();
 
     if (nostr && typeof nostr.signEvent === 'function') {
         try {
             const signed = await nostr.signEvent(event);
+            const signedEvent = typeof signed === 'string'
+                ? { ...event, id: await getEventHash(event), sig: signed }
+                : signed;
+            const expectedPubkey = userPubkey || event.pubkey || null;
+            await validateSignedEvent(signedEvent, expectedPubkey);
             if (typeof signed === 'string') {
-                return { ...event, sig: signed };
+                return signedEvent;
             }
-            return signed;
+            return signedEvent;
         } catch (err) {
             throw err;
-        }
-    }
-
-    // Fallback: use session private key
-    if (sessionSk) {
-        try {
-            return await signEventWithSk(event, sessionSk);
-        } catch (e) {
-            console.warn('sessionSk による署名に失敗しました', e);
-            throw e;
-        }
-    }
-
-    // Fallback: try stored private key in localStorage (plain HEX)
-    if (hasStoredSk()) {
-        try {
-            const stored = loadSkFromStorage();
-            if (!stored) throw new Error('key_not_found');
-            sessionSk = stored;
-            return await signEventWithSk(event, sessionSk);
-        } catch (e) {
-            console.warn('保存鍵の読み込み/署名に失敗しました', e);
-            throw new Error('key_not_found');
         }
     }
 
@@ -875,19 +855,93 @@ function logout() {
     showStatus('ログアウトしました', true);
 }
 
-// postMessageを受信してダイアログ制御
-window.addEventListener('message', (event) => {
-    // セキュリティ: 送信元のオリジンを確認
-    // 開発時や GitHub Pages でのホスティング（lokuyow.github.io）や
-    // ローカルサーバー（127.0.0.1:3000）からの利用を許可するため、
-    // 信頼できるオリジンの一覧を用意する。
-    const TRUSTED_ORIGINS = new Set([
-        EHAGAKI_ORIGIN,
-        window.location.origin,
-        'https://lokuyow.github.io',
-        'http://127.0.0.1:3000',
-    ]);
+function postToIframe(message) {
+    if (iframe.contentWindow) {
+        iframe.contentWindow.postMessage(message, EHAGAKI_ORIGIN);
+    }
+}
 
+async function handleParentClientMessage(data) {
+    if (data.type === 'auth.request') {
+        try {
+            const pubkeyHex = userPubkey || await getCurrentPubkey();
+            postToIframe({
+                namespace: EHAGAKI_NAMESPACE,
+                version: 1,
+                type: 'auth.result',
+                requestId: data.requestId,
+                payload: {
+                    pubkeyHex,
+                    capabilities: ['signEvent']
+                }
+            });
+        } catch (error) {
+            postToIframe({
+                namespace: EHAGAKI_NAMESPACE,
+                version: 1,
+                type: 'auth.error',
+                requestId: data.requestId,
+                payload: { message: error instanceof Error ? error.message : 'auth failed' }
+            });
+        }
+        return;
+    }
+
+    if (data.type === 'rpc.request' && data.payload?.method === 'signEvent') {
+        try {
+            const signedEvent = await signEventWithYourClient(data.payload?.params?.event);
+            postToIframe({
+                namespace: EHAGAKI_NAMESPACE,
+                version: 1,
+                type: 'rpc.result',
+                requestId: data.requestId,
+                payload: { result: signedEvent }
+            });
+        } catch (error) {
+            postToIframe({
+                namespace: EHAGAKI_NAMESPACE,
+                version: 1,
+                type: 'rpc.error',
+                requestId: data.requestId,
+                payload: { message: error instanceof Error ? error.message : 'sign failed' }
+            });
+        }
+    }
+}
+
+function getPostErrorMessage(errorCode) {
+    switch (errorCode) {
+        case 'empty_content':
+            return '❌ 投稿に失敗しました: 投稿内容が空です';
+        case 'login_required':
+            return '❌ 投稿に失敗しました: ログインが必要です';
+        case 'nostr_not_ready':
+            return '❌ 投稿に失敗しました: Nostrクライアントが初期化されていません';
+        case 'key_not_found':
+            return '❌ 投稿に失敗しました: 秘密鍵が見つかりません';
+        case 'post_error':
+            return '❌ 投稿に失敗しました: 投稿エラーが発生しました';
+        default:
+            return errorCode ? `❌ 投稿に失敗しました: ${errorCode}` : '❌ 投稿に失敗しました';
+    }
+}
+
+async function loginWithSecretKey(secretKey, { persist = false } = {}) {
+    sessionSk = normalizeSecretKey(secretKey);
+    const pubkey = await getPubkeyFromSk(sessionSk);
+    userPubkey = pubkey;
+    updateWalletUI();
+    saveLoginToStorage(pubkey);
+    if (persist) {
+        saveSkToStorage(sessionSk);
+    }
+    syncStoredKeyUI();
+    showStatus('秘密鍵でログインしました: ' + truncate(pubkey, 12), true);
+    return pubkey;
+}
+
+// postMessageを受信してダイアログ制御
+window.addEventListener('message', async (event) => {
     if (!TRUSTED_ORIGINS.has(event.origin)) {
         console.warn('信頼できないオリジンからのメッセージを受信:', event.origin);
         return;
@@ -899,7 +953,7 @@ window.addEventListener('message', (event) => {
         _handleCalculateSubFramePositioning(event);
         return;
     }
-    console.log('eHagakiからメッセージを受信:', data);
+    console.debug('eHagakiからメッセージを受信:', data);
 
     // 親クライアント連携（namespace ベース）のメッセージを優先処理
     if (data && data.namespace === EHAGAKI_NAMESPACE && data.version === 1) {
@@ -909,74 +963,16 @@ window.addEventListener('message', (event) => {
             return;
         }
 
-        (async () => {
-            try {
-                if (data.type === 'auth.request') {
-                    // iframe が親に認証情報（pubkey）を要求
-                    try {
-                        const pubkeyHex = userPubkey || await getCurrentPubkey();
-                        iframe.contentWindow.postMessage({
-                            namespace: EHAGAKI_NAMESPACE,
-                            version: 1,
-                            type: 'auth.result',
-                            requestId: data.requestId,
-                            payload: {
-                                pubkeyHex,
-                                capabilities: ['signEvent']
-                            }
-                        }, EHAGAKI_ORIGIN);
-                    } catch (err) {
-                        iframe.contentWindow.postMessage({
-                            namespace: EHAGAKI_NAMESPACE,
-                            version: 1,
-                            type: 'auth.error',
-                            requestId: data.requestId,
-                            payload: { message: err.message || 'auth failed' }
-                        }, EHAGAKI_ORIGIN);
-                    }
-                    return;
-                }
-
-                if (data.type === 'rpc.request' && data.payload?.method === 'signEvent') {
-                    // iframe からの署名リクエスト
-                    try {
-                        const eventToSign = data.payload?.params?.event;
-                        console.debug('親クライアント: 署名リクエスト受信', { requestId: data.requestId });
-                        console.debug('親クライアント: eventToSign', JSON.stringify(eventToSign));
-                        const signedEvent = await signEventWithYourClient(eventToSign);
-                        // Log full signed event as JSON so it's easy to copy for debugging (no secret key present)
-                        try {
-                            console.debug('親クライアント: 署名結果', { requestId: data.requestId, signedEventJson: JSON.stringify(signedEvent) });
-                        } catch (e) {
-                            console.debug('親クライアント: 署名結果 (object)', { requestId: data.requestId, signedEvent });
-                        }
-                        iframe.contentWindow.postMessage({
-                            namespace: EHAGAKI_NAMESPACE,
-                            version: 1,
-                            type: 'rpc.result',
-                            requestId: data.requestId,
-                            payload: { result: signedEvent }
-                        }, EHAGAKI_ORIGIN);
-                    } catch (error) {
-                        iframe.contentWindow.postMessage({
-                            namespace: EHAGAKI_NAMESPACE,
-                            version: 1,
-                            type: 'rpc.error',
-                            requestId: data.requestId,
-                            payload: { message: error instanceof Error ? error.message : 'sign failed' }
-                        }, EHAGAKI_ORIGIN);
-                    }
-                    return;
-                }
-            } catch (e) {
-                console.error('親クライアント message handling error', e);
-            }
-        })();
+        try {
+            await handleParentClientMessage(data);
+        } catch (error) {
+            console.error('親クライアント message handling error', error);
+        }
         return;
     }
 
     if (data.type === 'POST_SUCCESS') {
-        console.log('投稿成功:', data);
+        console.debug('投稿成功:', data);
         showStatus('✅ 投稿に成功しました！', true);
 
         // 投稿成功時にダイアログを閉じる
@@ -989,32 +985,7 @@ window.addEventListener('message', (event) => {
     } else if (data.type === 'POST_ERROR') {
         console.error('投稿失敗:', data);
 
-        // エラーメッセージを生成
-        let errorMessage = '❌ 投稿に失敗しました';
-
-        if (data.error) {
-            switch (data.error) {
-                case 'empty_content':
-                    errorMessage += ': 投稿内容が空です';
-                    break;
-                case 'login_required':
-                    errorMessage += ': ログインが必要です';
-                    break;
-                case 'nostr_not_ready':
-                    errorMessage += ': Nostrクライアントが初期化されていません';
-                    break;
-                case 'key_not_found':
-                    errorMessage += ': 秘密鍵が見つかりません';
-                    break;
-                case 'post_error':
-                    errorMessage += ': 投稿エラーが発生しました';
-                    break;
-                default:
-                    errorMessage += `: ${data.error}`;
-            }
-        }
-
-        showStatus(errorMessage, false);
+        showStatus(getPostErrorMessage(data.error), false);
 
         // エラー時はダイアログを閉じない（ユーザーが再試行できるように）
     }
@@ -1040,26 +1011,12 @@ document.addEventListener('keydown', (event) => {
 
 // ページ読み込み時の初期化
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('eHagaki iframe テストページが読み込まれました');
     hideStatus();
     // リロード時に保存されたログイン情報を復元
     loadSavedLogin();
     renderTimeline();
     connectRelay();
-
-    // 保存された秘密鍵がある場合、削除ボタンを表示
-    try {
-        const skClearBtnEl = document.getElementById('skClearBtn');
-        if (skClearBtnEl) {
-            if (hasStoredSk()) {
-                skClearBtnEl.style.display = 'inline-block';
-            } else {
-                skClearBtnEl.style.display = 'none';
-            }
-        }
-    } catch (e) {
-        // ignore
-    }
+    syncStoredKeyUI();
 });
 
 // ログイン関連ボタンのイベント
@@ -1068,31 +1025,19 @@ if (logoutBtn) logoutBtn.addEventListener('click', logout);
 
 // 秘密鍵ログインハンドラ
 async function handleSkLogin() {
-    const skInputEl = document.getElementById('skInput');
-    const skClearBtnEl = document.getElementById('skClearBtn');
-    if (!skInputEl) return;
-    let skVal = skInputEl.value.trim();
+    if (!skInput) return;
+
+    const skVal = skInput.value.trim();
     try {
         if (!skVal) {
-            // 入力がない場合は保存鍵を読み込んでログインを試行
-            if (hasStoredSk()) {
-                const stored = loadSkFromStorage();
-                if (!stored) {
-                    showStatus('保存鍵の読み込みに失敗しました', false);
-                    return;
-                }
-                sessionSk = stored;
-                const pub = await getPubkeyFromSk(sessionSk);
-                userPubkey = pub;
-                updateWalletUI();
-                showStatus('秘密鍵でログインしました: ' + truncate(pub, 12), true);
-                if (skClearBtnEl) skClearBtnEl.style.display = 'inline-block';
-                saveLoginToStorage(pub);
-                return;
-            } else {
-                showStatus('秘密鍵が入力されていません', false);
+            const stored = getStoredSecretKey();
+            if (stored) {
+                await loginWithSecretKey(stored);
                 return;
             }
+
+            showStatus('秘密鍵が入力されていません', false);
+            return;
         }
 
         // 入力は nsec1 形式のみ許容
@@ -1101,38 +1046,24 @@ async function handleSkLogin() {
             return;
         }
 
-        // bech32 -> HEX に変換して保存
-        const skHex = bech32Decode(skVal);
-        sessionSk = skHex;
-        const pub = await getPubkeyFromSk(sessionSk);
-        userPubkey = pub;
-        updateWalletUI();
-        showStatus('秘密鍵でログインしました: ' + truncate(pub, 12), true);
-        saveLoginToStorage(pub);
-
-        // plain HEX を localStorage に保存（パスフレーズは不要）
-        saveSkToStorage(sessionSk);
-        if (skClearBtnEl) skClearBtnEl.style.display = 'inline-block';
+        await loginWithSecretKey(skVal, { persist: true });
+        skInput.value = '';
     } catch (e) {
-        console.error('handleSkLogin error', e);
         if (e && e.message === 'no_secp_lib') {
-            showStatus('ライブラリが読み込めません。index.html に以下のスクリプトを追加して再読み込みしてください: https://cdn.jsdelivr.net/npm/@noble/secp256k1@1.10.0/lib/index.umd.min.js', false);
-            console.error('secp256k1 library not available. Add UMD script to index.html or enable network access.');
-            _diagnoseSecpGlobals();
+            showStatus('秘密鍵ログインに必要なライブラリを読み込めませんでした。通信環境またはCDNアクセス制限を確認してください。', false);
         } else {
             showStatus('秘密鍵ログインに失敗しました: ' + (e.message || e), false);
         }
+        console.error('handleSkLogin error', e);
     }
 }
 
 // UI ボタンのイベント登録
-const skLoginBtn = document.getElementById('skLoginBtn');
-const skClearBtn = document.getElementById('skClearBtn');
 if (skLoginBtn) skLoginBtn.addEventListener('click', handleSkLogin);
 if (skClearBtn) skClearBtn.addEventListener('click', () => {
     clearLocalSkStorage();
     sessionSk = null;
     updateWalletUI();
-    skClearBtn.style.display = 'none';
+    syncStoredKeyUI();
     showStatus('保存した秘密鍵を削除しました', true);
 });

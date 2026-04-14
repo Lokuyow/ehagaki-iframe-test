@@ -9,6 +9,7 @@ https://lokuyow.github.io/ehagaki-iframe-test/
 
 - ボタンクリックでモーダルダイアログを開く
 - ダイアログ内にeHagakiのiframeを表示（`https://ehagaki.vercel.app/`）
+- ブラウザ拡張（NIP-07）または `nsec1...` 秘密鍵でログイン
 - 投稿成功時（`POST_SUCCESS`）にダイアログを自動で閉じる
 - 投稿失敗時（`POST_ERROR`）にエラーメッセージを表示
 - セキュアなpostMessage通信
@@ -25,10 +26,11 @@ https://lokuyow.github.io/ehagaki-iframe-test/
 
 1. `index.html`をWebブラウザで開く
 2. ページ読み込み後、タイムラインに投稿が表示される（リレー接続後）
-3. 「📝 eHagaki を開く」ボタンをクリックすると通常投稿モードで起動
-4. タイムラインの「↩ リプライ」で `?reply=note1...` 付き起動
-5. タイムラインの「💬 引用リポスト」で `?quote=note1...` 付き起動
-6. 投稿成功時に自動でダイアログが閉じる
+3. NIP-07 ログイン、または `nsec1...` を入力して秘密鍵ログインを行う
+4. 「📝 eHagaki を開く」ボタンをクリックすると通常投稿モードで起動
+5. タイムラインの「↩ リプライ」で `?reply=note1...` 付き起動
+6. タイムラインの「💬 引用リポスト」で `?quote=note1...` 付き起動
+7. 投稿成功時に自動でダイアログが閉じる
 
 ## 実装されている機能
 
@@ -47,9 +49,15 @@ https://lokuyow.github.io/ehagaki-iframe-test/
 ### postMessage受信
 - `POST_SUCCESS`: 投稿成功時にダイアログを閉じる
 - `POST_ERROR`: エラーメッセージを表示（ダイアログは閉じない）
+- `ehagaki.parentClient`: 親クライアントとして認証・署名要求に応答
+
+### ログインと署名
+- NIP-07 が利用可能なら拡張機能から公開鍵取得と署名を行う
+- 秘密鍵ログイン中は、その公開鍵と一致する秘密鍵署名を優先する
+- NIP-07 署名結果も relay 送信前に `id` / `pubkey` / `sig` を検証する
 
 ### セキュリティ
-- オリジン検証（`https://ehagaki.vercel.app`のみ許可）
+- オリジン検証（eHagaki 本体、同一オリジン、ローカル開発オリジンを許可）
 - 不正なメッセージの無視
 
 ## 補足
