@@ -82,13 +82,6 @@ h1 {
     box-sizing: border-box;
 }
 
-#loginInfo {
-    margin-top: 8px;
-    font-size: 14px;
-    color: #333;
-    display: none;
-}
-
 #skLogin {
     margin-top: 10px;
 }

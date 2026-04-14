@@ -7,8 +7,6 @@ const iframe = document.getElementById('ehagaki-iframe');
 const timelineStatusDiv = document.getElementById('timelineStatus');
 const timelineDiv = document.getElementById('timeline');
 const loginBtn = document.getElementById('loginBtn');
-const loginInfoDiv = document.getElementById('loginInfo');
-const loginPubkeySpan = document.getElementById('loginPubkey');
 const skLoginContainer = document.getElementById('skLogin');
 const skInput = document.getElementById('skInput');
 const skLoginBtn = document.getElementById('skLoginBtn');
@@ -843,9 +841,6 @@ async function signEventWithYourClient(event) {
 
 function updateWalletUI() {
     if (userPubkey) {
-        loginPubkeySpan.textContent = truncate(userPubkey, 12);
-        loginInfoDiv.style.display = 'block';
-
         if (authMode === 'nip07') {
             if (loginBtn) {
                 loginBtn.textContent = '🔓 ログアウト';
@@ -888,8 +883,6 @@ function updateWalletUI() {
             }
         }
     } else {
-        loginPubkeySpan.textContent = '';
-        loginInfoDiv.style.display = 'none';
         if (loginBtn) {
             loginBtn.textContent = '🔐 ブラウザ拡張でログイン';
             loginBtn.disabled = false;
