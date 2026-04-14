@@ -12,7 +12,6 @@ const loginInfoDiv = document.getElementById('loginInfo');
 const loginPubkeySpan = document.getElementById('loginPubkey');
 const skInput = document.getElementById('skInput');
 const skLoginBtn = document.getElementById('skLoginBtn');
-const skClearBtn = document.getElementById('skClearBtn');
 
 // eHagaki 設定
 const EHAGAKI_ORIGIN = 'https://ehagaki.vercel.app';
@@ -24,6 +23,7 @@ const SUBSCRIPTION_LIMIT = 30;
 let relaySocket = null;
 let timelineEvents = [];
 let relayEoseReceived = false;
+let authMode = null; // 'nip07' or 'secret'
 const TRUSTED_ORIGINS = new Set([
     EHAGAKI_ORIGIN,
     window.location.origin,
@@ -77,11 +77,22 @@ function clearLoginFromStorage() {
     }
 }
 
-function loadSavedLogin() {
+async function restoreLoginState() {
     try {
+        const storedSk = getStoredSecretKey();
+        if (storedSk) {
+            sessionSk = normalizeSecretKey(storedSk);
+            userPubkey = await getPubkeyFromSk(sessionSk);
+            authMode = 'secret';
+            updateWalletUI();
+            showStatus('秘密鍵ログインを復元しました: ' + truncate(userPubkey, 12), true);
+            return;
+        }
+
         const pk = localStorage.getItem(STORAGE_KEY);
         if (pk) {
             userPubkey = pk;
+            authMode = 'nip07';
             updateWalletUI();
             showStatus('ログイン情報を復元しました: ' + truncate(pk, 12), true);
         }
@@ -474,11 +485,6 @@ function clearLocalSkStorage() {
     }
 }
 
-function syncStoredKeyUI() {
-    if (skClearBtn) {
-        skClearBtn.style.display = getStoredSecretKey() ? 'inline-block' : 'none';
-    }
-}
 
 function normalizeSecretKey(skValue) {
     if (!skValue) {
@@ -717,6 +723,10 @@ async function tryGetNip07Provider() {
 }
 
 async function resolveSecretKeySigner() {
+    if (authMode === 'nip07') {
+        return null;
+    }
+
     const candidates = [];
 
     if (sessionSk) {
@@ -747,36 +757,53 @@ async function resolveSecretKeySigner() {
 
 async function getCurrentPubkey() {
     if (userPubkey) return userPubkey;
-    const nostr = await tryGetNip07Provider();
-    if (nostr && typeof nostr.getPublicKey === 'function') {
+
+    if (authMode === 'secret') {
+        const stored = sessionSk || getStoredSecretKey();
+        if (stored) {
+            try {
+                const pub = await getPubkeyFromSk(stored);
+                if (!sessionSk) sessionSk = normalizeSecretKey(stored);
+                return pub;
+            } catch (e) {
+                console.warn('秘密鍵から公開鍵を導出できませんでした', e);
+                throw new Error('key_not_found');
+            }
+        }
+        throw new Error('key_not_found');
+    }
+
+    if (authMode === 'nip07') {
+        const nostr = await tryGetNip07Provider();
+        if (!nostr || typeof nostr.getPublicKey !== 'function') {
+            throw new Error('no_wallet');
+        }
         try {
-            const pk = await nostr.getPublicKey();
-            return pk;
+            return await nostr.getPublicKey();
         } catch (err) {
             throw new Error('user_rejected');
         }
     }
 
-    // Fallback: session private key
-    if (sessionSk) {
-        try {
-            const pub = await getPubkeyFromSk(sessionSk);
-            return pub;
-        } catch (e) {
-            console.warn('sessionSk から公開鍵を導出できませんでした', e);
-        }
-    }
-
-    // Fallback: stored private key in localStorage (plain HEX)
     const stored = getStoredSecretKey();
     if (stored) {
         try {
             sessionSk = normalizeSecretKey(stored);
-            const pub = await getPubkeyFromSk(sessionSk);
-            return pub;
+            authMode = 'secret';
+            return await getPubkeyFromSk(sessionSk);
         } catch (e) {
             console.warn('保存鍵の読み込みに失敗しました', e);
+            clearLocalSkStorage();
             throw new Error('key_not_found');
+        }
+    }
+
+    const nostr = await tryGetNip07Provider();
+    if (nostr && typeof nostr.getPublicKey === 'function') {
+        try {
+            return await nostr.getPublicKey();
+        } catch (err) {
+            throw new Error('user_rejected');
         }
     }
 
@@ -830,11 +857,19 @@ function updateWalletUI() {
 
 async function login() {
     try {
-        const pk = await getCurrentPubkey();
+        const nostr = await tryGetNip07Provider();
+        if (!nostr || typeof nostr.getPublicKey !== 'function') {
+            throw new Error('no_wallet');
+        }
+
+        const pk = await nostr.getPublicKey();
         userPubkey = pk;
+        authMode = 'nip07';
+        sessionSk = null;
+        clearLocalSkStorage();
         updateWalletUI();
-        showStatus('ログイン済み: ' + truncate(pk, 12), true);
         saveLoginToStorage(pk);
+        showStatus('ログイン済み: ' + truncate(pk, 12), true);
     } catch (err) {
         if (err.message === 'no_wallet') {
             showStatus('ログインに使用できるクライアントが見つかりません（NIP-07 対応が必要です）。GitHub Pages上では拡張機能の権限設定が必要な場合があります。ブラウザ拡張をこのサイトで許可してください。', false);
@@ -849,9 +884,11 @@ async function login() {
 
 function logout() {
     userPubkey = null;
+    authMode = null;
     sessionSk = null;
     updateWalletUI();
     clearLoginFromStorage();
+    clearLocalSkStorage();
     showStatus('ログアウトしました', true);
 }
 
@@ -930,12 +967,12 @@ async function loginWithSecretKey(secretKey, { persist = false } = {}) {
     sessionSk = normalizeSecretKey(secretKey);
     const pubkey = await getPubkeyFromSk(sessionSk);
     userPubkey = pubkey;
+    authMode = 'secret';
     updateWalletUI();
     saveLoginToStorage(pubkey);
     if (persist) {
         saveSkToStorage(sessionSk);
     }
-    syncStoredKeyUI();
     showStatus('秘密鍵でログインしました: ' + truncate(pubkey, 12), true);
     return pubkey;
 }
@@ -1010,13 +1047,12 @@ document.addEventListener('keydown', (event) => {
 });
 
 // ページ読み込み時の初期化
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     hideStatus();
     // リロード時に保存されたログイン情報を復元
-    loadSavedLogin();
+    await restoreLoginState();
     renderTimeline();
     connectRelay();
-    syncStoredKeyUI();
 });
 
 // ログイン関連ボタンのイベント
@@ -1060,10 +1096,3 @@ async function handleSkLogin() {
 
 // UI ボタンのイベント登録
 if (skLoginBtn) skLoginBtn.addEventListener('click', handleSkLogin);
-if (skClearBtn) skClearBtn.addEventListener('click', () => {
-    clearLocalSkStorage();
-    sessionSk = null;
-    updateWalletUI();
-    syncStoredKeyUI();
-    showStatus('保存した秘密鍵を削除しました', true);
-});
