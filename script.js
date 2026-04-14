@@ -7,6 +7,9 @@ const iframe = document.getElementById('ehagaki-iframe');
 const timelineStatusDiv = document.getElementById('timelineStatus');
 const timelineDiv = document.getElementById('timeline');
 
+// デバッグ: スクリプトが読み込まれたことと、window.nostr の有無をログに出す
+console.log('script.js loaded:', window.location.href);
+console.debug('window.nostr present:', typeof window.nostr !== 'undefined');
 // Login UI
 const loginBtn = document.getElementById('loginBtn');
 const logoutBtn = document.getElementById('logoutBtn');
@@ -466,7 +469,7 @@ async function login() {
         saveLoginToStorage(pk);
     } catch (err) {
         if (err.message === 'no_wallet') {
-            showStatus('ログインに使用できるクライアントが見つかりません（NIP-07 対応が必要です）。', false);
+                showStatus('ログインに使用できるクライアントが見つかりません（NIP-07 対応が必要です）。GitHub Pages上では拡張機能の権限設定が必要な場合があります。ブラウザ拡張をこのサイトで許可してください。', false);
         } else if (err.message === 'user_rejected') {
             showStatus('ログインがキャンセルされました。', false);
         } else {
