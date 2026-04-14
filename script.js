@@ -940,6 +940,7 @@ function logout() {
     updateWalletUI();
     clearLoginFromStorage();
     clearLocalSkStorage();
+    sendAuthLogoutToIframe();
     showStatus('ログアウトしました', true);
 }
 
@@ -947,6 +948,15 @@ function postToIframe(message) {
     if (iframe.contentWindow) {
         iframe.contentWindow.postMessage(message, EHAGAKI_ORIGIN);
     }
+}
+
+function sendAuthLogoutToIframe() {
+    if (!iframe.contentWindow) return;
+    postToIframe({
+        namespace: EHAGAKI_NAMESPACE,
+        version: 1,
+        type: 'auth.logout'
+    });
 }
 
 async function handleParentClientMessage(data) {
