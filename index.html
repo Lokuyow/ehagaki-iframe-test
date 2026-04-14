@@ -244,6 +244,19 @@
         <div id="loginHint" style="margin-top:6px; font-size:12px; color:#666;">
             ※ ブラウザ拡張（NIP-07）によるログインが必要です
         </div>
+        <!-- 秘密鍵ログイン UI (nsec1のみ、保存は平文HEX) -->
+        <div id="skLogin" style="margin-top:10px;">
+            <input type="password" id="skInput" placeholder="秘密鍵 (nsec1...) を入力" style="width:70%; padding:6px;" />
+            <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+                <button id="skLoginBtn" class="open-button" style="background-color:#ffc107;">🔑 秘密鍵でログイン</button>
+                <button id="skClearBtn" class="open-button"
+                    style="background-color:#dc3545; display:none;">鍵を削除</button>
+                <label id="skRememberLabel" style="font-size:12px; color:#666; margin-left:8px;">入力すると秘密鍵HEXを
+                    localStorage に保存します（平文）</label>
+            </div>
+            <div id="skHint" style="font-size:12px; color:#666; margin-top:6px;">※ nsec1... 形式のみ対応。保存時に秘密鍵HEXを
+                localStorage に平文で保存します。</div>
+        </div>
 
         <input type="text" id="contentInput" placeholder="投稿内容を入力...">
 
@@ -267,6 +280,7 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/@noble/secp256k1@1.10.0/lib/index.umd.min.js"></script>
     <script src="./nip07-poller.js"></script>
     <script src="./script.js"></script>
 </body>
