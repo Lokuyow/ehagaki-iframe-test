@@ -508,7 +508,17 @@ function logout() {
 // postMessageを受信してダイアログ制御
 window.addEventListener('message', (event) => {
     // セキュリティ: 送信元のオリジンを確認
-    if (event.origin !== EHAGAKI_ORIGIN) {
+    // 開発時や GitHub Pages でのホスティング（lokuyow.github.io）や
+    // ローカルサーバー（127.0.0.1:3000）からの利用を許可するため、
+    // 信頼できるオリジンの一覧を用意する。
+    const TRUSTED_ORIGINS = new Set([
+        EHAGAKI_ORIGIN,
+        window.location.origin,
+        'https://lokuyow.github.io',
+        'http://127.0.0.1:3000',
+    ]);
+
+    if (!TRUSTED_ORIGINS.has(event.origin)) {
         console.warn('信頼できないオリジンからのメッセージを受信:', event.origin);
         return;
     }
