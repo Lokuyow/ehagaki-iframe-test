@@ -231,6 +231,20 @@
             📝 eHagaki を開く
         </button>
 
+        <button id="loginBtn" class="open-button" style="background-color:#28a745; margin-top:10px;"
+            title="ブラウザ拡張（NIP-07）でログイン">
+            🔐 ログイン（ブラウザ拡張・NIP-07）
+        </button>
+        <button id="logoutBtn" class="open-button" style="background-color:#6c757d; margin-top:10px; display:none;">
+            🔓 ログアウト
+        </button>
+        <div id="loginInfo" style="margin-top:8px; font-size:14px; color:#333; display:none;">
+            ログイン済み: <span id="loginPubkey"></span>
+        </div>
+        <div id="loginHint" style="margin-top:6px; font-size:12px; color:#666;">
+            ※ ブラウザ拡張（NIP-07）によるログインが必要です
+        </div>
+
         <input type="text" id="contentInput" placeholder="投稿内容を入力...">
 
         <h2 class="section-title">簡易タイムライン（wss://yabu.me）</h2>

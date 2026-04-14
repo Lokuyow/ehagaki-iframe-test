@@ -7,8 +7,16 @@ const iframe = document.getElementById('ehagaki-iframe');
 const timelineStatusDiv = document.getElementById('timelineStatus');
 const timelineDiv = document.getElementById('timeline');
 
+// Login UI
+const loginBtn = document.getElementById('loginBtn');
+const logoutBtn = document.getElementById('logoutBtn');
+const loginInfoDiv = document.getElementById('loginInfo');
+const loginPubkeySpan = document.getElementById('loginPubkey');
+
+// eHagaki 設定
 const EHAGAKI_ORIGIN = 'https://ehagaki.vercel.app';
 const EHAGAKI_URL = `${EHAGAKI_ORIGIN}/`;
+const EHAGAKI_NAMESPACE = 'ehagaki.parentClient';
 const RELAY_URL = 'wss://yabu.me/';
 const SUBSCRIPTION_LIMIT = 30;
 
@@ -17,12 +25,44 @@ let relayConnected = false;
 let timelineEvents = [];
 let relayEoseReceived = false;
 
+let userPubkey = null;
+// 永続化キー（公開鍵のみを保存）
+const STORAGE_KEY = 'ehagaki_parent_pubkey';
+
+function saveLoginToStorage(pubkey) {
+    try {
+        localStorage.setItem(STORAGE_KEY, pubkey);
+    } catch (e) {
+        console.warn('localStorage に保存できませんでした', e);
+    }
+}
+
+function clearLoginFromStorage() {
+    try {
+        localStorage.removeItem(STORAGE_KEY);
+    } catch (e) {
+        console.warn('localStorage の削除に失敗しました', e);
+    }
+}
+
+function loadSavedLogin() {
+    try {
+        const pk = localStorage.getItem(STORAGE_KEY);
+        if (pk) {
+            userPubkey = pk;
+            updateWalletUI();
+            showStatus('ログイン情報を復元しました: ' + truncate(pk, 12), true);
+        }
+    } catch (e) {
+        console.warn('localStorage からの読み込みに失敗しました', e);
+    }
+}
+
 // ダイアログを開く
 function openDialog(params = {}) {
     const contentInput = document.getElementById('contentInput');
     const content = contentInput.value.trim();
     const url = buildIframeUrl(content, params);
-    const iframe = document.getElementById('ehagaki-iframe');
     iframe.src = url;
 
     modal.style.display = 'block';
@@ -43,6 +83,13 @@ function buildIframeUrl(content, params = {}) {
 
     if (params.quote) {
         url.searchParams.set('quote', params.quote);
+    }
+
+    // 親クライアント連携のため parentOrigin を渡す
+    try {
+        url.searchParams.set('parentOrigin', window.location.origin);
+    } catch (e) {
+        console.warn('parentOrigin を設定できませんでした', e);
     }
 
     return url.toString();
@@ -362,23 +409,79 @@ function connectRelay() {
     });
 }
 
-// イベントリスナーの設定
-openDialogBtn.addEventListener('click', openDialog);
-closeBtn.addEventListener('click', closeDialog);
-
-// モーダルの背景をクリックしたら閉じる
-modal.addEventListener('click', (event) => {
-    if (event.target === modal) {
-        closeDialog();
+// ---------- Wallet / Parent-client helpers ----------
+async function getCurrentPubkey() {
+    if (userPubkey) return userPubkey;
+    if (window.nostr && typeof window.nostr.getPublicKey === 'function') {
+        try {
+            const pk = await window.nostr.getPublicKey();
+            return pk;
+        } catch (err) {
+            throw new Error('user_rejected');
+        }
     }
-});
+    throw new Error('no_wallet');
+}
 
-// ESCキーでダイアログを閉じる
-document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && modal.style.display === 'block') {
-        closeDialog();
+async function signEventWithYourClient(event) {
+    if (!window.nostr) {
+        throw new Error('no_wallet');
     }
-});
+
+    if (typeof window.nostr.signEvent === 'function') {
+        try {
+            const signed = await window.nostr.signEvent(event);
+            if (typeof signed === 'string') {
+                return { ...event, sig: signed };
+            }
+            return signed;
+        } catch (err) {
+            throw err;
+        }
+    }
+
+    throw new Error('no_sign_function');
+}
+
+function updateWalletUI() {
+    if (userPubkey) {
+        loginPubkeySpan.textContent = truncate(userPubkey, 12);
+        loginInfoDiv.style.display = 'block';
+        if (loginBtn) loginBtn.style.display = 'none';
+        if (logoutBtn) logoutBtn.style.display = 'inline-block';
+    } else {
+        loginPubkeySpan.textContent = '';
+        loginInfoDiv.style.display = 'none';
+        if (loginBtn) loginBtn.style.display = 'inline-block';
+        if (logoutBtn) logoutBtn.style.display = 'none';
+    }
+}
+
+async function login() {
+    try {
+        const pk = await getCurrentPubkey();
+        userPubkey = pk;
+        updateWalletUI();
+        showStatus('ログイン済み: ' + truncate(pk, 12), true);
+        saveLoginToStorage(pk);
+    } catch (err) {
+        if (err.message === 'no_wallet') {
+            showStatus('ログインに使用できるクライアントが見つかりません（NIP-07 対応が必要です）。', false);
+        } else if (err.message === 'user_rejected') {
+            showStatus('ログインがキャンセルされました。', false);
+        } else {
+            showStatus('ログインエラー: ' + err.message, false);
+        }
+        console.error(err);
+    }
+}
+
+function logout() {
+    userPubkey = null;
+    updateWalletUI();
+    clearLoginFromStorage();
+    showStatus('ログアウトしました', true);
+}
 
 // postMessageを受信してダイアログ制御
 window.addEventListener('message', (event) => {
@@ -390,6 +493,72 @@ window.addEventListener('message', (event) => {
 
     const data = event.data;
     console.log('eHagakiからメッセージを受信:', data);
+
+    // 親クライアント連携（namespace ベース）のメッセージを優先処理
+    if (data && data.namespace === EHAGAKI_NAMESPACE && data.version === 1) {
+        // イベント発信元が iframe であることを確認
+        if (event.source !== iframe.contentWindow) {
+            console.warn('信頼できない送信元 (source) からの親クライアント要求');
+            return;
+        }
+
+        (async () => {
+            try {
+                if (data.type === 'auth.request') {
+                    // iframe が親に認証情報（pubkey）を要求
+                    try {
+                        const pubkeyHex = userPubkey || await getCurrentPubkey();
+                        iframe.contentWindow.postMessage({
+                            namespace: EHAGAKI_NAMESPACE,
+                            version: 1,
+                            type: 'auth.result',
+                            requestId: data.requestId,
+                            payload: {
+                                pubkeyHex,
+                                capabilities: ['signEvent']
+                            }
+                        }, EHAGAKI_ORIGIN);
+                    } catch (err) {
+                        iframe.contentWindow.postMessage({
+                            namespace: EHAGAKI_NAMESPACE,
+                            version: 1,
+                            type: 'auth.error',
+                            requestId: data.requestId,
+                            payload: { message: err.message || 'auth failed' }
+                        }, EHAGAKI_ORIGIN);
+                    }
+                    return;
+                }
+
+                if (data.type === 'rpc.request' && data.payload?.method === 'signEvent') {
+                    // iframe からの署名リクエスト
+                    try {
+                        const eventToSign = data.payload?.params?.event;
+                        const signedEvent = await signEventWithYourClient(eventToSign);
+                        iframe.contentWindow.postMessage({
+                            namespace: EHAGAKI_NAMESPACE,
+                            version: 1,
+                            type: 'rpc.result',
+                            requestId: data.requestId,
+                            payload: { result: signedEvent }
+                        }, EHAGAKI_ORIGIN);
+                    } catch (error) {
+                        iframe.contentWindow.postMessage({
+                            namespace: EHAGAKI_NAMESPACE,
+                            version: 1,
+                            type: 'rpc.error',
+                            requestId: data.requestId,
+                            payload: { message: error instanceof Error ? error.message : 'sign failed' }
+                        }, EHAGAKI_ORIGIN);
+                    }
+                    return;
+                }
+            } catch (e) {
+                console.error('親クライアント message handling error', e);
+            }
+        })();
+        return;
+    }
 
     if (data.type === 'POST_SUCCESS') {
         console.log('投稿成功:', data);
@@ -436,10 +605,34 @@ window.addEventListener('message', (event) => {
     }
 });
 
+// イベントリスナーの設定
+openDialogBtn.addEventListener('click', openDialog);
+closeBtn.addEventListener('click', closeDialog);
+
+// モーダルの背景をクリックしたら閉じる
+modal.addEventListener('click', (event) => {
+    if (event.target === modal) {
+        closeDialog();
+    }
+});
+
+// ESCキーでダイアログを閉じる
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && modal.style.display === 'block') {
+        closeDialog();
+    }
+});
+
 // ページ読み込み時の初期化
 document.addEventListener('DOMContentLoaded', () => {
     console.log('eHagaki iframe テストページが読み込まれました');
     hideStatus();
+    // リロード時に保存されたログイン情報を復元
+    loadSavedLogin();
     renderTimeline();
     connectRelay();
 });
+
+// ログイン関連ボタンのイベント
+if (loginBtn) loginBtn.addEventListener('click', login);
+if (logoutBtn) logoutBtn.addEventListener('click', logout);
