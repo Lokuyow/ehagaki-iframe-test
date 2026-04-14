@@ -845,7 +845,6 @@ function updateWalletUI() {
             if (loginBtn) {
                 loginBtn.textContent = '🔓 ログアウト';
                 loginBtn.disabled = false;
-                loginBtn.style.display = 'inline-block';
             }
             if (skLoginContainer) skLoginContainer.style.display = 'block';
             if (skInput) skInput.disabled = true;
@@ -857,7 +856,6 @@ function updateWalletUI() {
             if (loginBtn) {
                 loginBtn.textContent = '🔐 ブラウザ拡張でログイン';
                 loginBtn.disabled = true;
-                loginBtn.style.display = 'inline-block';
             }
             if (skLoginContainer) {
                 skLoginContainer.style.display = 'block';
@@ -871,7 +869,6 @@ function updateWalletUI() {
             if (loginBtn) {
                 loginBtn.textContent = '🔐 ブラウザ拡張でログイン';
                 loginBtn.disabled = false;
-                loginBtn.style.display = 'inline-block';
             }
             if (skLoginContainer) {
                 skLoginContainer.style.display = 'block';
@@ -886,7 +883,6 @@ function updateWalletUI() {
         if (loginBtn) {
             loginBtn.textContent = '🔐 ブラウザ拡張でログイン';
             loginBtn.disabled = false;
-            loginBtn.style.display = 'inline-block';
         }
         if (skLoginContainer) {
             skLoginContainer.style.display = 'block';
