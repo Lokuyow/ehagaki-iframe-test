@@ -7,9 +7,9 @@ const iframe = document.getElementById('ehagaki-iframe');
 const timelineStatusDiv = document.getElementById('timelineStatus');
 const timelineDiv = document.getElementById('timeline');
 const loginBtn = document.getElementById('loginBtn');
-const logoutBtn = document.getElementById('logoutBtn');
 const loginInfoDiv = document.getElementById('loginInfo');
 const loginPubkeySpan = document.getElementById('loginPubkey');
+const skLoginContainer = document.getElementById('skLogin');
 const skInput = document.getElementById('skInput');
 const skLoginBtn = document.getElementById('skLoginBtn');
 
@@ -845,13 +845,64 @@ function updateWalletUI() {
     if (userPubkey) {
         loginPubkeySpan.textContent = truncate(userPubkey, 12);
         loginInfoDiv.style.display = 'block';
-        if (loginBtn) loginBtn.style.display = 'none';
-        if (logoutBtn) logoutBtn.style.display = 'inline-block';
+
+        if (authMode === 'nip07') {
+            if (loginBtn) {
+                loginBtn.textContent = '🔓 ログアウト';
+                loginBtn.disabled = false;
+                loginBtn.style.display = 'inline-block';
+            }
+            if (skLoginContainer) skLoginContainer.style.display = 'block';
+            if (skInput) skInput.disabled = true;
+            if (skLoginBtn) {
+                skLoginBtn.textContent = '🔑 秘密鍵でログイン';
+                skLoginBtn.disabled = true;
+            }
+        } else if (authMode === 'secret') {
+            if (loginBtn) {
+                loginBtn.textContent = '🔐 ブラウザ拡張でログイン';
+                loginBtn.disabled = true;
+                loginBtn.style.display = 'inline-block';
+            }
+            if (skLoginContainer) {
+                skLoginContainer.style.display = 'block';
+                if (skInput) skInput.disabled = false;
+                if (skLoginBtn) {
+                    skLoginBtn.textContent = '🔓 ログアウト';
+                    skLoginBtn.disabled = false;
+                }
+            }
+        } else {
+            if (loginBtn) {
+                loginBtn.textContent = '🔐 ブラウザ拡張でログイン';
+                loginBtn.disabled = false;
+                loginBtn.style.display = 'inline-block';
+            }
+            if (skLoginContainer) {
+                skLoginContainer.style.display = 'block';
+                if (skInput) skInput.disabled = false;
+                if (skLoginBtn) {
+                    skLoginBtn.textContent = '🔑 秘密鍵でログイン';
+                    skLoginBtn.disabled = false;
+                }
+            }
+        }
     } else {
         loginPubkeySpan.textContent = '';
         loginInfoDiv.style.display = 'none';
-        if (loginBtn) loginBtn.style.display = 'inline-block';
-        if (logoutBtn) logoutBtn.style.display = 'none';
+        if (loginBtn) {
+            loginBtn.textContent = '🔐 ブラウザ拡張でログイン';
+            loginBtn.disabled = false;
+            loginBtn.style.display = 'inline-block';
+        }
+        if (skLoginContainer) {
+            skLoginContainer.style.display = 'block';
+            if (skInput) skInput.disabled = false;
+            if (skLoginBtn) {
+                skLoginBtn.textContent = '🔑 秘密鍵でログイン';
+                skLoginBtn.disabled = false;
+            }
+        }
     }
 }
 
@@ -1056,8 +1107,24 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ログイン関連ボタンのイベント
-if (loginBtn) loginBtn.addEventListener('click', login);
-if (logoutBtn) logoutBtn.addEventListener('click', logout);
+if (loginBtn) {
+    loginBtn.addEventListener('click', async () => {
+        if (userPubkey && authMode === 'nip07') {
+            logout();
+        } else {
+            await login();
+        }
+    });
+}
+if (skLoginBtn) {
+    skLoginBtn.addEventListener('click', async () => {
+        if (userPubkey && authMode === 'secret') {
+            logout();
+        } else {
+            await handleSkLogin();
+        }
+    });
+}
 
 // 秘密鍵ログインハンドラ
 async function handleSkLogin() {

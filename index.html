@@ -5,216 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>eHagaki iframe テスト</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            background-color: #f5f5f5;
-        }
-
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-        }
-
-        h1 {
-            color: #333;
-            text-align: center;
-        }
-
-        .open-button {
-            display: block;
-            margin: 20px auto;
-            padding: 12px 24px;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 16px;
-            cursor: pointer;
-            transition: background-color 0.3s;
-        }
-
-        .open-button:hover {
-            background-color: #0056b3;
-        }
-
-        /* コンテンツ入力フィールド */
-        #contentInput {
-            display: block;
-            margin: 10px auto;
-            padding: 8px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            font-size: 14px;
-            width: calc(100% - 40px);
-            max-width: 100%;
-            box-sizing: border-box;
-        }
-
-        .section-title {
-            margin: 28px 0 12px;
-            color: #2d3748;
-            font-size: 18px;
-            border-bottom: 2px solid #e2e8f0;
-            padding-bottom: 6px;
-        }
-
-        .timeline-status {
-            margin: 10px 0;
-            padding: 10px;
-            border-radius: 6px;
-            background-color: #edf2f7;
-            color: #2d3748;
-            font-size: 14px;
-        }
-
-        .timeline-status.error {
-            background-color: #fed7d7;
-            color: #822727;
-        }
-
-        .timeline {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            margin-top: 12px;
-        }
-
-        .timeline-item {
-            background: #f7fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 12px;
-        }
-
-        .timeline-item-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-            font-size: 12px;
-            color: #4a5568;
-        }
-
-        .timeline-item-content {
-            font-size: 14px;
-            line-height: 1.5;
-            color: #1a202c;
-            white-space: pre-wrap;
-            word-break: break-word;
-            margin-bottom: 10px;
-        }
-
-        .timeline-actions {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
-        .timeline-action-btn {
-            border: 1px solid #cbd5e0;
-            background: #ffffff;
-            color: #2d3748;
-            border-radius: 6px;
-            padding: 6px 10px;
-            font-size: 13px;
-            cursor: pointer;
-        }
-
-        .timeline-action-btn:hover {
-            background: #ebf8ff;
-            border-color: #90cdf4;
-        }
-
-        /* モーダルダイアログのスタイル */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-        }
-
-        .modal-content {
-            position: relative;
-            margin: auto;
-            width: 100%;
-            max-width: 800px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-            overflow: hidden;
-        }
-
-        .modal-footer {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background-color: #f8f9fa;
-            flex-shrink: 0;
-        }
-
-        .close-button {
-            background: none;
-            border: none;
-            font-size: 36px;
-            cursor: pointer;
-            color: #666;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .close-button:hover {
-            color: #000;
-        }
-
-        .modal-body {
-            padding: 0;
-            margin: 0;
-            font-size: 0;
-        }
-
-        .ehagaki-iframe {
-            width: 100%;
-            height: 85dvh;
-            border: none;
-            flex-shrink: 1;
-        }
-
-        .status {
-            margin: 20px 0;
-            padding: 10px;
-            border-radius: 4px;
-            text-align: center;
-            font-weight: bold;
-        }
-
-        .status.success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-
-        .status.error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-
-        .status.hidden {
-            display: none;
-        }
-    </style>
+    <link rel="stylesheet" href="styles.css">
 </head>
 
 <body>
@@ -227,36 +18,30 @@
             <li>リプライと引用リポストのテスト</li>
         </ul>
 
-        <button id="openDialogBtn" class="open-button">
-            📝 eHagaki を開く
-        </button>
-
-        <button id="loginBtn" class="open-button" style="background-color:#28a745; margin-top:10px;"
-            title="ブラウザ拡張（NIP-07）でログイン">
-            🔐 ログイン（ブラウザ拡張・NIP-07）
-        </button>
-        <button id="logoutBtn" class="open-button" style="background-color:#6c757d; margin-top:10px; display:none;">
-            🔓 ログアウト
-        </button>
-        <div id="loginInfo" style="margin-top:8px; font-size:14px; color:#333; display:none;">
-            ログイン済み: <span id="loginPubkey"></span>
-        </div>
-        <div id="loginHint" style="margin-top:6px; font-size:12px; color:#666;">
-            ※ ブラウザ拡張（NIP-07）によるログイン。秘密鍵ログインとは排他的です。
-        </div>
-        <!-- 秘密鍵ログイン UI (nsec1のみ、保存は平文HEX) -->
-        <div id="skLogin" style="margin-top:10px;">
-            <input type="password" id="skInput" placeholder="秘密鍵 (nsec1...) を入力" style="width:70%; padding:6px;" />
-            <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-                <button id="skLoginBtn" class="open-button" style="background-color:#ffc107;">🔑 秘密鍵でログイン</button>
-                <label id="skRememberLabel" style="font-size:12px; color:#666; margin-left:8px;">入力すると秘密鍵HEXを
-                    localStorage に保存します（平文）。ログアウトで削除されます。</label>
+        <div class="control-group">
+            <div class="control-group__title">ログイン</div>
+            <button id="loginBtn" class="open-button button-success mt-10" title="ブラウザ拡張（NIP-07）でログイン">
+                🔐 ブラウザ拡張でログイン
+            </button>
+            <div id="loginInfo">
+                ログイン済み: <span id="loginPubkey"></span>
             </div>
-            <div id="skHint" style="font-size:12px; color:#666; margin-top:6px;">※ nsec1...
-                形式のみ対応。保存時に秘密鍵HEXをlocalStorage に平文で保存します。</div>
+            <!-- 秘密鍵ログイン UI (nsec1のみ、保存は平文HEX) -->
+            <div id="skLogin">
+                <form id="skLoginForm" class="sk-login-row" onsubmit="return false;">
+                    <input type="password" id="skInput" placeholder="秘密鍵 (nsec1...) を入力" class="sk-input" />
+                    <button type="button" id="skLoginBtn" class="open-button button-warning">🔑 秘密鍵でログイン</button>
+                </form>
+            </div>
         </div>
 
-        <input type="text" id="contentInput" placeholder="投稿内容を入力...">
+        <div class="control-group">
+            <div class="control-group__title">投稿</div>
+            <input type="text" id="contentInput" placeholder="投稿内容を入力..." class="mt-12" />
+            <button id="openDialogBtn" class="open-button mt-10">
+                📝 eHagaki を開く
+            </button>
+        </div>
 
         <h2 class="section-title">簡易タイムライン（wss://yabu.me）</h2>
         <div id="timelineStatus" class="timeline-status">タイムラインを接続中...</div>
