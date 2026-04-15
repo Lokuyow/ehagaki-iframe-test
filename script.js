@@ -84,6 +84,7 @@ async function restoreLoginState() {
             authMode = 'secret';
             updateWalletUI();
             showStatus('秘密鍵ログインを復元しました: ' + truncate(userPubkey, 12), true);
+            sendAuthLoginToIframe(userPubkey);
             return;
         }
 
@@ -93,6 +94,7 @@ async function restoreLoginState() {
             authMode = 'nip07';
             updateWalletUI();
             showStatus('ログイン情報を復元しました: ' + truncate(pk, 12), true);
+            sendAuthLoginToIframe(pk);
         }
     } catch (e) {
         console.warn('localStorage からの読み込みに失敗しました', e);
@@ -910,6 +912,7 @@ async function login() {
         updateWalletUI();
         saveLoginToStorage(pk);
         showStatus('ログイン済み: ' + truncate(pk, 12), true);
+        sendAuthLoginToIframe(pk);
     } catch (err) {
         if (err.message === 'no_wallet') {
             showStatus('ログインに使用できるクライアントが見つかりません（NIP-07 対応が必要です）。GitHub Pages上では拡張機能の権限設定が必要な場合があります。ブラウザ拡張をこのサイトで許可してください。', false);
@@ -937,6 +940,16 @@ function postToIframe(message) {
     if (iframe.contentWindow) {
         iframe.contentWindow.postMessage(message, EHAGAKI_ORIGIN);
     }
+}
+
+function sendAuthLoginToIframe(pubkeyHex) {
+    if (!iframe.contentWindow || !pubkeyHex) return;
+    postToIframe({
+        namespace: EHAGAKI_NAMESPACE,
+        version: 1,
+        type: 'auth.login',
+        payload: { pubkeyHex }
+    });
 }
 
 function sendAuthLogoutToIframe() {
@@ -1024,6 +1037,7 @@ async function loginWithSecretKey(secretKey, { persist = false } = {}) {
         saveSkToStorage(sessionSk);
     }
     showStatus('秘密鍵でログインしました: ' + truncate(pubkey, 12), true);
+    sendAuthLoginToIframe(pubkey);
     return pubkey;
 }
 
@@ -1041,6 +1055,14 @@ window.addEventListener('message', async (event) => {
         return;
     }
     console.debug('eHagakiからメッセージを受信:', data);
+
+    // iframe 側の準備完了通知を受け取ったとき、親側ログイン状態を同期する
+    if (data && data.type === 'ready') {
+        if (event.source === iframe.contentWindow && userPubkey) {
+            sendAuthLoginToIframe(userPubkey);
+        }
+        return;
+    }
 
     // 親クライアント連携（namespace ベース）のメッセージを優先処理
     if (data && data.namespace === EHAGAKI_NAMESPACE && data.version === 1) {
