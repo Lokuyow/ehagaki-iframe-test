@@ -128,11 +128,14 @@ function buildIframeUrl(content, params = {}) {
         url.searchParams.set('quote', params.quote);
     }
 
-    // 親クライアント連携のため parentOrigin を渡す
-    try {
-        url.searchParams.set('parentOrigin', window.location.origin);
-    } catch (e) {
-        console.warn('parentOrigin を設定できませんでした', e);
+    // 親クライアント連携のため parentOrigin を渡すのは、
+    // 現在の親ページがログイン済みの場合のみ
+    if (userPubkey) {
+        try {
+            url.searchParams.set('parentOrigin', window.location.origin);
+        } catch (e) {
+            console.warn('parentOrigin を設定できませんでした', e);
+        }
     }
 
     return url.toString();
@@ -963,27 +966,27 @@ function sendAuthLogoutToIframe() {
 
 async function handleParentClientMessage(data) {
     if (data.type === 'auth.request') {
-        try {
-            const pubkeyHex = userPubkey || await getCurrentPubkey();
-            postToIframe({
-                namespace: EHAGAKI_NAMESPACE,
-                version: 1,
-                type: 'auth.result',
-                requestId: data.requestId,
-                payload: {
-                    pubkeyHex,
-                    capabilities: ['signEvent']
-                }
-            });
-        } catch (error) {
+        if (!userPubkey) {
             postToIframe({
                 namespace: EHAGAKI_NAMESPACE,
                 version: 1,
                 type: 'auth.error',
                 requestId: data.requestId,
-                payload: { message: error instanceof Error ? error.message : 'auth failed' }
+                payload: { message: 'login_required' }
             });
+            return;
         }
+
+        postToIframe({
+            namespace: EHAGAKI_NAMESPACE,
+            version: 1,
+            type: 'auth.result',
+            requestId: data.requestId,
+            payload: {
+                pubkeyHex: userPubkey,
+                capabilities: ['signEvent']
+            }
+        });
         return;
     }
 
